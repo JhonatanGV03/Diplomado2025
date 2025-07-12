@@ -13,6 +13,9 @@ services:
       - datosdb:/var/lib/mysql
     networks:
       - red_interna
+    ports:
+      - "3306:3306"
+
 
   app:
     build: ./app
