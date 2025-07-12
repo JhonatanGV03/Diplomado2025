@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS llaves_publicas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nombre_clave VARCHAR(255) NOT NULL,
+    llave TEXT NOT NULL,
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

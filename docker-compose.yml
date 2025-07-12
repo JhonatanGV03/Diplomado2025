@@ -1,0 +1,34 @@
+services:
+  persistencia:
+    image: mysql:8.0
+    container_name: persistencia
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: diplomado
+      MYSQL_DATABASE: persistencia
+      MYSQL_USER: diplomado
+      MYSQL_PASSWORD: diplomado
+    volumes:
+      - ./sql:/docker-entrypoint-initdb.d
+      - datosdb:/var/lib/mysql
+    networks:
+      - red_interna
+
+  app:
+    build: ./app
+    container_name: app
+    restart: always
+    depends_on:
+      - persistencia
+    networks:
+      - red_interna
+    ports:
+      - "5000:5000"
+
+volumes:
+  datosdb:
+
+
+networks:
+  red_interna:
+    driver: bridge
