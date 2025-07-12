@@ -1,7 +1,7 @@
 FROM ubuntu:22.04
 
 RUN apt-get update && \
-    apt-get install -y iptables iproute2 curl && \
+    apt-get install -y iptables iproute2 iputils-ping curl net-tools && \
     apt-get clean
 
 COPY entrypoint.sh /entrypoint.sh
