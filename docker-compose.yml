@@ -25,8 +25,17 @@ services:
       - persistencia
     networks:
       - red_interna
+
+  firewall:
+    build: ./firewall
+    container_name: firewall
+    networks:
+      - red_interna
     ports:
-      - "5000:5000"
+      - "443:443"
+    cap_add:
+      - NET_ADMIN
+    privileged: true
 
 volumes:
   datosdb:
