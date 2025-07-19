@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Registro de Usuario</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 400px;
+        margin: 50px auto;
+        padding: 20px;
+      }
+      .error {
+        color: red;
+        margin-bottom: 10px;
+      }
+      .success {
+        color: green;
+        margin-bottom: 10px;
+      }
+      input {
+        width: 100%;
+        padding: 8px;
+        margin: 5px 0 15px 0;
+      }
+      button {
+        background: #28a745;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #218838;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Registro de Usuario</h2>
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %} {% if success %}
+    <div class="success">{{ success }}</div>
+    {% if redirect_to_login %}
+    <script>
+      setTimeout(function () {
+        window.location.href = "/login";
+      }, 2000); // Redirigir después de 2 segundos
+    </script>
+    {% endif %} {% endif %} {% if not success %}
+    <form method="post">
+      <label>Username:</label><br />
+      <input type="text" name="username" required /><br />
+
+      <label>Email:</label><br />
+      <input type="email" name="email" required /><br />
+
+      <label>Password:</label><br />
+      <input type="password" name="password" required /><br />
+
+      <button type="submit">Registrar</button>
+    </form>
+    {% endif %}
+
+    <p><a href="/login">¿Ya tienes cuenta? Inicia sesión</a></p>
+  </body>
+</html>
