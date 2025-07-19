@@ -1,14 +1,88 @@
 <!DOCTYPE html>
 <html>
-<head>
+  <head>
     <title>Generar Llaves RSA</title>
-</head>
-<body>
-    <h2>Crear par de llaves</h2>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 600px;
+        margin: 50px auto;
+        padding: 20px;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+      }
+      .user-info {
+        font-size: 14px;
+        color: #666;
+      }
+      input {
+        width: 300px;
+        padding: 8px;
+        margin: 5px 0 15px 0;
+      }
+      button {
+        background: #28a745;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        cursor: pointer;
+        margin-right: 10px;
+      }
+      button:hover {
+        background: #218838;
+      }
+      .logout-btn {
+        background: #dc3545;
+      }
+      .logout-btn:hover {
+        background: #c82333;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h2>Crear par de llaves RSA</h2>
+      <div class="user-info">
+        Bienvenido, {{ username }}
+        <a href="/logout"><button class="logout-btn">Cerrar Sesión</button></a>
+      </div>
+    </div>
+
     <form method="post">
-        <label>Nombre clave:</label>
-        <input type="text" name="nombre_clave" required>
-        <button type="submit">Generar</button>
+      <label>Nombre de la clave:</label><br />
+      <input
+        type="text"
+        name="nombre_clave"
+        required
+        placeholder="Ingrese un nombre para su clave"
+      />
+      <br />
+      <button type="submit">Generar Llaves</button>
     </form>
-</body>
+
+    <div
+      style="
+        margin-top: 30px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 5px;
+      "
+    >
+      <h3>Instrucciones:</h3>
+      <ol>
+        <li>Ingrese un nombre único para identificar su par de llaves</li>
+        <li>Haga clic en "Generar Llaves"</li>
+        <li>La llave pública se guardará en la base de datos</li>
+        <li>La llave privada se descargará automáticamente</li>
+      </ol>
+      <p>
+        <strong>Importante:</strong> Guarde su llave privada en un lugar seguro.
+        No la comparta con nadie.
+      </p>
+    </div>
+  </body>
 </html>

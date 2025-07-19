@@ -2,3 +2,6 @@ flask
 cryptography
 pymysql
 sqlalchemy
+pyjwt
+werkzeug
+flask-bcrypt
