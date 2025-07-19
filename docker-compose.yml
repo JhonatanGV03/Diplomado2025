@@ -25,8 +25,9 @@ services:
       - persistencia
     networks:
       - red_interna
-    ports:
-      - "5000:5000"
+    volumes:
+      - archivos_data:/app/archivos
+      - firmas_data:/app/firmas
 
   firewall:
     build: ./firewall

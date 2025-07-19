@@ -72,6 +72,140 @@
         border-radius: 5px;
       "
     >
+      <h3>Subir archivo para firmar</h3>
+        <form id="upload-form" enctype="multipart/form-data">
+          <input type="file" name="archivo" required>
+          <button type="submit">Subir</button>
+        </form>
+
+        <script>
+        document.getElementById("upload-form").addEventListener("submit", function(event) {
+            event.preventDefault(); // Evita que recargue la página
+
+            const form = event.target;
+            const formData = new FormData(form);
+
+            fetch("/upload", {
+                method: "POST",
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(`Archivo subido\n\nHash: ${data.hash}`);
+                location.reload();
+            })
+            .catch(error => {
+                console.error("Error al subir archivo:", error);
+                alert("Ocurrió un error al subir el archivo");
+            });
+        });
+        </script>
+
+      <h3>Archivos disponibles para firmar</h3>
+        {% if archivos %}
+          <div style="max-height: 250px; overflow-y: auto; border: 1px solid #ccc;">
+            <table border="1" cellpadding="6" cellspacing="0" style="width: 100%;">
+              <thead style="background-color: #f0f0f0;">
+                <tr>
+                  <th>ID</th>
+                  <th>Nombre</th>
+                  <th>Hash</th>
+                  <th>Fecha</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for archivo in archivos %}
+                <tr>
+                  <td>{{ archivo.id }}</td>
+                  <td>{{ archivo.nombre }}</td>
+                  <td style="font-size: 12px; word-break: break-all;">{{ archivo.hash }}</td>
+                  <td>{{ archivo.fecha_subida }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p>No hay archivos disponibles todavía.</p>
+        {% endif %}
+
+
+      <h3>Firmar archivo</h3>
+        <form id="firmar-form" enctype="multipart/form-data">
+          <label>ID del archivo:</label><br>
+          <input type="number" name="archivo_id" required><br><br>
+
+          <label>Subir llave privada (.pem):</label><br>
+          <input type="file" name="llave" required><br><br>
+
+          <button type="submit">Firmar archivo</button>
+        </form>
+
+        <script>
+        document.getElementById("firmar-form").addEventListener("submit", function(event) {
+          event.preventDefault();
+
+          const form = event.target;
+          const formData = new FormData(form);
+
+          fetch("/firmar", {
+            method: "POST",
+            body: formData
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.ruta_firma) {
+              alert(`Archivo firmado correctamente\n\nFirma guardada en:\n${data.ruta_firma}`);
+              window.open("/" + data.ruta_firma, "_blank");
+            } else {
+              alert(`Error al firmar archivo: ${data.message || "Error desconocido"}`);
+            }
+          })
+          .catch(error => {
+            console.error("Error:", error);
+            alert("Error al firmar el archivo.");
+          });
+        });
+        </script>
+
+      <hr>
+      <h3>Verificar firma de archivo</h3>
+        <form id="verificar-form" enctype="multipart/form-data">
+          <label>ID del archivo firmado:</label><br>
+          <input type="number" name="archivo_id" required><br><br>
+
+          <label>Subir archivo de firma (.firma):</label><br>
+          <input type="file" name="firma" required><br><br>
+
+          <button type="submit">Verificar Firma</button>
+        </form>
+
+        <script>
+        document.getElementById("verificar-form").addEventListener("submit", function(event) {
+          event.preventDefault();
+
+          const form = event.target;
+          const formData = new FormData(form);
+
+          fetch("/verificar", {
+            method: "POST",
+            body: formData
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.valido) {
+              alert("Firma:\n" + data.mensaje);
+            } else {
+              alert("Firma:\n" + data.mensaje);
+            }
+          })
+          .catch(error => {
+            console.error("Error:", error);
+            alert("Error al verificar la firma");
+          });
+        });
+        </script>
+
       <h3>Instrucciones:</h3>
       <ol>
         <li>Ingrese un nombre único para identificar su par de llaves</li>

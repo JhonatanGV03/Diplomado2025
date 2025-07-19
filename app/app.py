@@ -1,7 +1,12 @@
 from flask import Flask, request, render_template, send_file, jsonify, session, redirect, url_for
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
+from werkzeug.utils import secure_filename
+import hashlib
 import os
+from flask import send_from_directory
 import jwt
 import datetime
 import secrets
@@ -13,6 +18,10 @@ app = Flask(__name__)
 app.secret_key = 'tu_clave_secreta_muy_segura'  # Cambiar por una clave segura
 PRIVATE_FOLDER = "private_keys"
 os.makedirs(PRIVATE_FOLDER, exist_ok=True)
+UPLOAD_FOLDER = "archivos"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+FIRMAS_FOLDER = "firmas"
+os.makedirs(FIRMAS_FOLDER, exist_ok=True)
 
 # Clave secreta para JWT (en producción usar variable de entorno)
 JWT_SECRET_KEY = secrets.token_urlsafe(32)  # 256 bits de entropía
@@ -21,6 +30,7 @@ JWT_ALGORITHM = 'HS256'
 # Conexión a MySQL
 engine = create_engine("mysql+pymysql://diplomado:diplomado@persistencia:3306/persistencia")
 
+#-------------------------------------JWT---------------------------------------
 def generate_jwt_token(user_id, username):
     """Genera un token JWT para el usuario"""
     payload = {
@@ -91,6 +101,7 @@ def jwt_required(f):
     
     return decorated
 
+#------------------------------------- Autenticación y Registro ---------------------------------------
 # Rutas de autenticación
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -126,7 +137,7 @@ def register():
                 {"username": username, "email": email, "password_hash": password_hash}
             )
             conn.commit()
-        
+
         # Si es una petición JSON (API), devolver JSON
         if request.is_json:
             return jsonify({'message': 'Usuario registrado exitosamente'}), 201
@@ -161,7 +172,7 @@ def login():
             if user and check_password_hash(user[2], password):
                 # Generar JWT token
                 token = generate_jwt_token(user[0], user[1])
-                
+
                 # Si es una petición JSON (API), devolver JSON
                 if request.is_json:
                     return jsonify({
@@ -188,40 +199,58 @@ def login():
 @app.route("/", methods=["GET", "POST"])
 @jwt_required
 def index():
+    user_id = request.current_user.get('user_id')
+    username = request.current_user.get('username', 'Usuario')
+
     if request.method == "POST":
         nombre = request.form["nombre_clave"]
 
-        # Generar llaves
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        public_key = private_key.public_key()
-
-        # Serializar
-        priv_pem = private_key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption()
-        )
-        pub_pem = public_key.public_bytes(
-            serialization.Encoding.PEM,
-            serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-
-        # Guardar pública en base de datos
         with engine.connect() as conn:
-            conn.execute(text("INSERT INTO llaves_publicas (nombre_clave, llave) VALUES (:nombre, :llave)"),
-                         {"nombre": nombre, "llave": pub_pem.decode("utf-8")})
+            # Verificar si el usuario ya tiene una llave
+            existing = conn.execute(
+                text("SELECT id FROM llaves_publicas WHERE user_id = :uid"),
+                {"uid": user_id}
+            ).fetchone()
+
+            if existing:
+                return render_template("index.html", username=username, error="Ya has generado una llave.")
+
+            # Generar llaves
+            private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            public_key = private_key.public_key()
+
+            # Serializar
+            priv_pem = private_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+            pub_pem = public_key.public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+
+            # Guardar pública en base de datos
+            conn.execute(text("""
+                            INSERT INTO llaves_publicas (user_id, nombre_clave, llave)
+                            VALUES (:uid, :nombre, :llave)
+                        """), {"uid": user_id, "nombre": nombre, "llave": pub_pem.decode("utf-8")})
             conn.commit()
 
-        # Guardar privada y ofrecer descarga
+        # Guardar privada
         priv_path = os.path.join(PRIVATE_FOLDER, f"{nombre}_private.pem")
         with open(priv_path, "wb") as f:
             f.write(priv_pem)
 
         return send_file(priv_path, as_attachment=True)
 
-    # Obtener información del usuario para mostrar en la página
-    username = request.current_user.get('username', 'Usuario')
-    return render_template("index.html", username=username)
+    with engine.connect() as conn:
+        archivos = conn.execute(text("""
+            SELECT id, nombre, hash, fecha_subida FROM archivos
+            WHERE usuario_id = :usuario_id
+        """), {"usuario_id": user_id}).fetchall()
+
+    return render_template("index.html", username=username, archivos=archivos)
 
 # Ruta para logout
 @app.route('/logout')
@@ -243,6 +272,159 @@ def verify_token():
         return jsonify({'valid': True, 'payload': payload}), 200
     else:
         return jsonify({'valid': False, 'error': 'Token inválido o expirado'}), 401
+
+
+
+# --------------------------------- Rutas de archivos y firmas ---------------------------------
+@app.route("/upload", methods=["POST"])
+@jwt_required
+def upload_file():
+    if 'archivo' not in request.files:
+        return jsonify({"error": "No se envió archivo"}), 400
+
+    file = request.files['archivo']
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(filepath)
+
+    # hash
+    sha256 = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        sha256.update(f.read())
+    hash_hex = sha256.hexdigest()
+
+    # Guardar en la base de datos
+    with engine.connect() as conn:
+        conn.execute(text("""
+            INSERT INTO archivos (nombre, ruta, hash, usuario_id)
+            VALUES (:nombre, :ruta, :hash, :usuario_id)
+        """), {
+            "nombre": filename,
+            "ruta": filepath,
+            "hash": hash_hex,
+            "usuario_id": request.current_user['user_id']
+        })
+        conn.commit()
+
+    return jsonify({"message": "Archivo subido", "hash": hash_hex})
+
+
+@app.route("/firmar", methods=["POST"])
+@jwt_required
+def firmar_archivo():
+    archivo_id = request.form.get("archivo_id")
+    llave = request.files.get("llave")
+
+    if not archivo_id or not llave:
+        return jsonify({"error": "Datos incompletos"}), 400
+
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT ruta, nombre FROM archivos WHERE id = :id"), {"id": archivo_id}).fetchone()
+    if not result:
+        return jsonify({"error": "Archivo no encontrado"}), 404
+
+    ruta_archivo, nombre_archivo = result
+
+    with open(ruta_archivo, "rb") as f:
+        contenido = f.read()
+
+    private_key = serialization.load_pem_private_key(
+        llave.read(),
+        password=None
+    )
+
+    # Firmar el contenido
+    firma = private_key.sign(
+        contenido,
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ),
+        hashes.SHA256()
+    )
+
+    # Guardar firma
+    ruta_firma = os.path.join(FIRMAS_FOLDER, f"{nombre_archivo}.firma")
+    with open(ruta_firma, "wb") as f:
+        f.write(firma)
+
+    with engine.connect() as conn:
+        conn.execute(text("""
+            INSERT INTO firmas (archivo_id, firma, usuario_id)
+            VALUES (:archivo_id, :firma, :usuario_id)
+        """), {
+            "archivo_id": archivo_id,
+            "firma": firma,
+            "usuario_id": request.current_user['user_id']
+        })
+        conn.commit()
+
+    return jsonify({
+        "message": "Archivo firmado",
+        "ruta_firma": f"firmas/{os.path.basename(ruta_firma)}"
+    })
+
+@app.route('/firmas/<filename>')
+def descargar_firma(filename):
+    return send_from_directory('firmas', filename)
+
+
+@app.route("/verificar", methods=["POST"])
+@jwt_required
+def verificar_firma():
+    archivo_id = request.form.get("archivo_id")
+    archivo_firma = request.files.get("firma")  # archivo .firma subido por el usuario
+
+    if not archivo_id or not archivo_firma:
+        return jsonify({"error": "Faltan datos"}), 400
+
+    with engine.connect() as conn:
+        archivo_data = conn.execute(text("""
+            SELECT a.nombre, f.usuario_id
+            FROM archivos a
+            JOIN firmas f ON f.archivo_id = a.id
+            WHERE a.id = :aid
+        """), {"aid": archivo_id}).fetchone()
+
+        if not archivo_data:
+            return jsonify({"error": "Archivo o firma no encontrada"}), 404
+
+        archivo_nombre, firmante_id = archivo_data
+        ruta_archivo = os.path.join("archivos", archivo_nombre)
+
+        try:
+            with open(ruta_archivo, "rb") as f:
+                contenido = f.read()
+        except FileNotFoundError:
+            return jsonify({"error": "Archivo original no encontrado en disco"}), 404
+
+        # Obtener la llave pública
+        public_key_row = conn.execute(text("""
+            SELECT llave FROM llaves_publicas WHERE user_id = :uid
+        """), {"uid": firmante_id}).fetchone()
+
+        if not public_key_row:
+            return jsonify({"error": "Llave pública del firmante no encontrada"}), 404
+
+        llave_publica_pem = public_key_row[0]
+
+    # Verificar la firma
+    try:
+        public_key = serialization.load_pem_public_key(llave_publica_pem.encode("utf-8"))
+
+        public_key.verify(
+            signature=archivo_firma.read(),
+            data=contenido,
+            padding=padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            algorithm=hashes.SHA256()
+        )
+
+        return jsonify({"valido": True, "mensaje": "válida"})
+    except Exception as e:
+        return jsonify({"valido": False, "mensaje": "inválida", "error": str(e)})
 
 
 if __name__ == "__main__":
