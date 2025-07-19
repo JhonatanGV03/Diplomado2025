@@ -25,6 +25,8 @@ services:
       - persistencia
     networks:
       - red_interna
+    ports:
+      - "5000:5000"
 
   firewall:
     build: ./firewall

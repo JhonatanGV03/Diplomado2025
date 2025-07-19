@@ -4,6 +4,7 @@ from cryptography.hazmat.primitives import serialization
 import os
 import jwt
 import datetime
+import secrets
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from sqlalchemy import create_engine, text
@@ -14,7 +15,7 @@ PRIVATE_FOLDER = "private_keys"
 os.makedirs(PRIVATE_FOLDER, exist_ok=True)
 
 # Clave secreta para JWT (en producción usar variable de entorno)
-JWT_SECRET_KEY = 'jwt_secret_key_muy_segura'
+JWT_SECRET_KEY = secrets.token_urlsafe(32)  # 256 bits de entropía
 JWT_ALGORITHM = 'HS256'
 
 # Conexión a MySQL
@@ -34,7 +35,19 @@ def generate_jwt_token(user_id, username):
 def verify_jwt_token(token):
     """Verifica un token JWT"""
     try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token,
+                              JWT_SECRET_KEY,
+                             algorithms=[JWT_ALGORITHM],
+                             options={
+                "verify_exp": True,                #  Verifica que no esté expirado
+                "verify_signature": True,          #  Firma debe ser válida
+                "require": ["exp", "iat", "iss"],  #  Campos obligatorios
+                 }
+        )
+    
+        if payload["iss"] != "diplomado-jwt-app":
+            raise ValueError("Issuer inválido")
+        
         return payload
     except jwt.ExpiredSignatureError:
         return None  # Token expirado
@@ -219,18 +232,18 @@ def logout():
 # Ruta para verificar token
 @app.route('/verify-token', methods=['POST'])
 def verify_token():
-    token = request.headers.get('Authorization')
-    if not token:
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith("Bearer "):
         return jsonify({'valid': False, 'error': 'Token no proporcionado'}), 400
-    
-    if token.startswith('Bearer '):
-        token = token[7:]
-    
+
+    token = auth_header.split(" ")[1]
+
     payload = verify_jwt_token(token)
     if payload:
         return jsonify({'valid': True, 'payload': payload}), 200
     else:
         return jsonify({'valid': False, 'error': 'Token inválido o expirado'}), 401
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, ssl_context=("cert.pem", "key.pem"))
