@@ -42,6 +42,8 @@ services:
 
 volumes:
   datosdb:
+  archivos_data:
+  firmas_data:
 
 
 networks:
