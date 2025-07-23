@@ -16,7 +16,6 @@ services:
     ports:
       - "3306:3306"
 
-
   app:
     build: ./app
     container_name: app
@@ -32,6 +31,8 @@ services:
   firewall:
     build: ./firewall
     container_name: firewall
+    depends_on:
+      - app
     networks:
       - red_interna
     ports:
@@ -44,7 +45,6 @@ volumes:
   datosdb:
   archivos_data:
   firmas_data:
-
 
 networks:
   red_interna:
