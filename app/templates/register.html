@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
   <head>
     <title>Registro de Usuario</title>
     <style>
@@ -9,19 +10,23 @@
         margin: 50px auto;
         padding: 20px;
       }
+
       .error {
         color: red;
         margin-bottom: 10px;
       }
+
       .success {
         color: green;
         margin-bottom: 10px;
       }
+
       input {
         width: 100%;
         padding: 8px;
         margin: 5px 0 15px 0;
       }
+
       button {
         background: #28a745;
         color: white;
@@ -29,11 +34,13 @@
         border: none;
         cursor: pointer;
       }
+
       button:hover {
         background: #218838;
       }
     </style>
   </head>
+
   <body>
     <h2>Registro de Usuario</h2>
     {% if error %}
@@ -60,6 +67,14 @@
       <button type="submit">Registrar</button>
     </form>
     {% endif %}
+
+    <hr>
+    <p>O inicia sesión con:</p>
+    <a href="{{ url_for('login_google') }}">
+      <img src="{{ url_for('static', filename='google_login.jpeg') }}" alt="Iniciar sesión con Google"
+        style="height: 40px;">
+    </a>
+
 
     <p><a href="/login">¿Ya tienes cuenta? Inicia sesión</a></p>
   </body>

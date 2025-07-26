@@ -1,21 +1,27 @@
-from flask import Flask, request, render_template, send_file, jsonify, session, redirect, url_for
+from flask import Flask, request, render_template, send_file, jsonify, session, redirect, url_for, send_from_directory
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 from werkzeug.utils import secure_filename
+from authlib.integrations.flask_client import OAuth
+from flask_login import LoginManager, login_user, UserMixin, logout_user, login_required
+from dotenv import load_dotenv
+import jwt
 import hashlib
 import os
-from flask import send_from_directory
-import jwt
 import datetime
 import secrets
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from sqlalchemy import create_engine, text
 
+load_dotenv()
+
 app = Flask(__name__)
 app.secret_key = 'tu_clave_secreta_muy_segura'  # Cambiar por una clave segura
+oauth = OAuth(app)
+
 PRIVATE_FOLDER = "private_keys"
 os.makedirs(PRIVATE_FOLDER, exist_ok=True)
 UPLOAD_FOLDER = "archivos"
@@ -30,6 +36,41 @@ JWT_ALGORITHM = 'HS256'
 # Conexión a MySQL
 engine = create_engine("mysql+pymysql://diplomado:diplomado@persistencia:3306/persistencia")
 
+google = oauth.register(
+    name='google',
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    access_token_url='https://oauth2.googleapis.com/token',
+    access_token_params=None,
+    authorize_url='https://accounts.google.com/o/oauth2/auth',
+    authorize_params={'access_type': 'offline'},
+    api_base_url='https://www.googleapis.com/oauth2/v1/',
+    userinfo_endpoint='https://openidconnect.googleapis.com/v1/userinfo',
+    client_kwargs={'scope': 'openid email profile'},
+    request_token_params={'scope': 'email profile'},
+    request_token_url=None,
+)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+
+class User(UserMixin):
+    def __init__(self, id_, name, email):
+        self.id = id_
+        self.name = name
+        self.email = email
+
+users = {}
+
+@login_manager.user_loader
+def load_user(user_id):
+    return users.get(user_id)
+
+# @app.route('/')
+# def index():
+#    return 'Bienvenido. <a href="/login">Iniciar sesión con Google</a>'
+
 #-------------------------------------JWT---------------------------------------
 def generate_jwt_token(user_id, username):
     """Genera un token JWT para el usuario"""
@@ -43,66 +84,87 @@ def generate_jwt_token(user_id, username):
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 def verify_jwt_token(token):
-    """Verifica un token JWT"""
     try:
-        payload = jwt.decode(token,
-                              JWT_SECRET_KEY,
-                             algorithms=[JWT_ALGORITHM],
-                             options={
-                "verify_exp": True,                #  Verifica que no esté expirado
-                "verify_signature": True,          #  Firma debe ser válida
-                "require": ["exp", "iat", "iss"],  #  Campos obligatorios
-                 }
-        )
-    
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM], options={
+            "verify_exp": True,
+            "verify_signature": True,
+            "require": ["exp", "iat", "iss"],
+        })
         if payload["iss"] != "diplomado-jwt-app":
             raise ValueError("Issuer inválido")
-        
         return payload
     except jwt.ExpiredSignatureError:
-        return None  # Token expirado
+        return None
     except jwt.InvalidTokenError:
-        return None  # Token inválido
+        return None
 
 def jwt_required(f):
     """Decorador para rutas que requieren autenticación JWT"""
     @wraps(f)
     def decorated(*args, **kwargs):
         token = None
-        
-        # Intentar obtener token del header Authorization
         auth_header = request.headers.get('Authorization')
         if auth_header and auth_header.startswith('Bearer '):
             token = auth_header[7:]
-        
-        # Si no hay token en header, intentar obtenerlo de la sesión
         if not token and 'jwt_token' in session:
             token = session['jwt_token']
-        
-        # Si no hay token, redirigir al login
         if not token:
             if request.is_json:
                 return jsonify({'error': 'Token requerido'}), 401
             else:
                 return redirect(url_for('login'))
-        
         payload = verify_jwt_token(token)
         if not payload:
-            # Token inválido, limpiar sesión y redirigir
             session.clear()
             if request.is_json:
                 return jsonify({'error': 'Token inválido o expirado'}), 401
             else:
                 return redirect(url_for('login'))
-        
-        # Agregar información del usuario al request
         request.current_user = payload
         return f(*args, **kwargs)
-    
     return decorated
+
 
 #------------------------------------- Autenticación y Registro ---------------------------------------
 # Rutas de autenticación
+
+@app.route("/login/google")
+def login_google():
+    nonce = secrets.token_urlsafe(16)
+    session['nonce'] = nonce
+    redirect_uri = url_for('authorize_google', _external=True)
+    return oauth.google.authorize_redirect(redirect_uri, nonce=nonce)
+
+@app.route("/authorize/google")
+def authorize_google():
+    token = oauth.google.authorize_access_token()
+    nonce = session.get('nonce')
+    user_info = oauth.google.parse_id_token(token, nonce=nonce)
+
+    email = user_info.get("email")
+    nombre = user_info.get("name") or email.split("@")[0]
+
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT id, username FROM usuarios WHERE email = :email"), {"email": email}).fetchone()
+
+        if not result:
+            username = nombre.replace(" ", "_").lower()
+            conn.execute(text("INSERT INTO usuarios (username, email, password_hash, activo) VALUES (:u, :e, '', TRUE)"), {
+                "u": username,
+                "e": email
+            })
+            conn.commit()
+            result = conn.execute(text("SELECT id, username FROM usuarios WHERE email = :email"), {"email": email}).fetchone()
+
+        user_id, username = result
+        token_jwt = generate_jwt_token(user_id, username)
+
+        session['jwt_token'] = token_jwt
+        session['user_id'] = user_id
+        session['username'] = username
+
+    return redirect(url_for('index'))
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':

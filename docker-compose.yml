@@ -27,6 +27,8 @@ services:
     volumes:
       - archivos_data:/app/archivos
       - firmas_data:/app/firmas
+    env_file:
+      - app/oauth.env
 
   firewall:
     build: ./firewall

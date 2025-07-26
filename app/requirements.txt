@@ -5,3 +5,7 @@ sqlalchemy
 pyjwt
 werkzeug
 flask-bcrypt
+Authlib
+Flask-Login
+python-dotenv
+requests
