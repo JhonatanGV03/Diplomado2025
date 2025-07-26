@@ -33,6 +33,7 @@ services:
   firewall:
     build: ./firewall
     container_name: firewall
+    restart: always
     depends_on:
       - app
     networks:
