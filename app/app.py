@@ -2,6 +2,8 @@ import datetime  # Manejo de fechas y tiempos
 import hashlib  # Funciones hash, utilizado para calcular el hash de los archivos
 import os  # Funciones del sistema operativo (crear directorios, unir rutas, etc.)
 import secrets  # Para generar tokens y números seguros
+import tempfile
+from flask import send_file, after_this_request
 from functools import wraps  # Para crear decoradores que modifican funciones
 
 import jwt  # Manejo de JSON Web Tokens
@@ -330,14 +332,30 @@ def index():
                               """), {"uid": user_id, "nombre": nombre, "llave": pub_pem.decode("utf-8")})
             conn.commit()
 
-        # Guardar la llave privada en el servidor y enviarla al usuario para descarga
+        # Guardar la llave privada temporalmente para enviarla al usuario
         priv_path = os.path.join(PRIVATE_FOLDER, f"{nombre}_private.pem")
         with open(priv_path, "wb") as f:
             f.write(priv_pem)
 
-        return send_file(priv_path, as_attachment=True)
+        # Configurar para eliminar el archivo después de enviarlo
+        @after_this_request
+        def remove_file(response):
+            try:
+                os.remove(priv_path)
+                print(f"Llave privada temporal eliminada: {priv_path}")
+            except Exception as error:
+                print(f"Error eliminando llave privada temporal: {error}")
+            return response
 
-    # Se obtienen los archivos propios y compartidos del usuario para mostrarlos
+        # Enviar el archivo al usuario
+        return send_file(
+            priv_path,
+            as_attachment=True,
+            download_name=f"{nombre}_private.pem",
+            mimetype='application/x-pem-file'
+        )
+
+    # Código para GET requests - mostrar la página principal
     with engine.connect() as conn:
         archivos_propios = conn.execute(text("""
                                              SELECT DISTINCT a.id,
@@ -398,6 +416,7 @@ def index():
 
             archivos_con_firmas.append(archivo_dict)
 
+    # Renderizar la página principal con la lista de archivos
     return render_template("index.html", username=username, archivos=archivos_con_firmas)
 
 
