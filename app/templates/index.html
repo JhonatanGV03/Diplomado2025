@@ -1,28 +1,40 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Generar Llaves RSA</title>
+    <title>Sistema de Firma Digital</title>
     <style>
       body {
         font-family: Arial, sans-serif;
-        max-width: 600px;
-        margin: 50px auto;
+        max-width: 1200px;
+        margin: 30px auto;
         padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        background-color: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
       }
       .header {
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #eee;
       }
       .user-info {
         font-size: 14px;
         color: #666;
       }
-      input {
+      input,
+      select {
         width: 300px;
         padding: 8px;
         margin: 5px 0 15px 0;
+        border: 1px solid #ddd;
+        border-radius: 4px;
       }
       button {
         background: #28a745;
@@ -31,6 +43,7 @@
         border: none;
         cursor: pointer;
         margin-right: 10px;
+        border-radius: 4px;
       }
       button:hover {
         background: #218838;
@@ -41,182 +54,527 @@
       .logout-btn:hover {
         background: #c82333;
       }
+      .section {
+        margin: 20px 0;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border: 1px solid #e9ecef;
+      }
+      .archivos-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+      .archivos-table th,
+      .archivos-table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+      }
+      .archivos-table th {
+        background-color: #f0f0f0;
+        font-weight: bold;
+      }
+      .archivo-propio {
+        background-color: #e7f3ff;
+      }
+      .archivo-compartido {
+        background-color: #fff3cd;
+      }
+      .firma-valida {
+        color: green;
+        font-weight: bold;
+      }
+      .firma-invalida {
+        color: red;
+        font-weight: bold;
+      }
+      .share-btn {
+        background: #007bff;
+        padding: 5px 10px;
+        font-size: 12px;
+      }
+      .share-btn:hover {
+        background: #0056b3;
+      }
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 1;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.4);
+      }
+      .modal-content {
+        background-color: #fefefe;
+        margin: 10% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 500px;
+        max-height: 80vh;
+        overflow-y: auto;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+      .close {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .close:hover {
+        color: black;
+      }
+      .firma-lista {
+        margin-top: 5px;
+        font-size: 12px;
+        color: #666;
+      }
+      .firma-item {
+        display: inline-block;
+        margin-right: 10px;
+        padding: 2px 6px;
+        background: #e9ecef;
+        border-radius: 3px;
+      }
+      .hash-cell {
+        font-size: 10px;
+        word-break: break-all;
+        max-width: 150px;
+        color: #666;
+      }
+      .tipo-badge {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: bold;
+      }
+      .tipo-propio {
+        background-color: #007bff;
+        color: white;
+      }
+      .tipo-compartido {
+        background-color: #ffc107;
+        color: #333;
+      }
+      .compartidos-lista {
+        margin-top: 10px;
+        padding: 10px;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+      }
+      .compartidos-lista ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .compartidos-lista li {
+        padding: 5px 0;
+        border-bottom: 1px solid #dee2e6;
+      }
+      .compartidos-lista li:last-child {
+        border-bottom: none;
+      }
     </style>
   </head>
   <body>
-    <div class="header">
-      <h2>Crear par de llaves RSA</h2>
-      <div class="user-info">
-        Bienvenido, {{ username }}
-        <a href="/logout"><button class="logout-btn">Cerrar Sesión</button></a>
+    <div class="container">
+      <div class="header">
+        <h1>Sistema de Firma Digital con Federación</h1>
+        <div class="user-info">
+          Bienvenido, <strong>{{ username }}</strong>
+          <a href="/logout"
+            ><button class="logout-btn">Cerrar Sesión</button></a
+          >
+        </div>
+      </div>
+
+      {% if error %}
+      <div
+        style="
+          background-color: #f8d7da;
+          color: #721c24;
+          padding: 10px;
+          border-radius: 4px;
+          margin-bottom: 20px;
+        "
+      >
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <!-- Sección para generar llaves -->
+      <div class="section">
+        <h2>📑 Generar Par de Llaves RSA</h2>
+        <form method="post">
+          <label>Nombre de la clave:</label><br />
+          <input
+            type="text"
+            name="nombre_clave"
+            required
+            placeholder="Ingrese un nombre para su clave"
+          />
+          <br />
+          <button type="submit">Generar Llaves</button>
+        </form>
+        <p style="font-size: 12px; color: #666">
+          Nota: Solo puedes generar un par de llaves por usuario
+        </p>
+      </div>
+
+      <!-- Sección para subir archivos -->
+      <div class="section">
+        <h2>📤 Subir Archivo</h2>
+        <form id="upload-form" enctype="multipart/form-data">
+          <input type="file" name="archivo" required />
+          <button type="submit">Subir Archivo</button>
+        </form>
+      </div>
+
+      <!-- Tabla de archivos disponibles -->
+      <div class="section">
+        <h2>📁 Archivos Disponibles para Firmar</h2>
+        <p style="font-size: 14px; color: #666">
+          Los archivos con fondo
+          <span style="background-color: #e7f3ff; padding: 2px 5px">azul</span>
+          son tuyos, los de fondo
+          <span style="background-color: #fff3cd; padding: 2px 5px"
+            >amarillo</span
+          >
+          son compartidos contigo.
+        </p>
+
+        {% if archivos %}
+        <div style="overflow-x: auto">
+          <table class="archivos-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nombre</th>
+                <th>Propietario</th>
+                <th>Tipo</th>
+                <th>Hash</th>
+                <th>Firmas</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for archivo in archivos %}
+              <tr
+                class="{% if archivo.tipo == 'Propio' %}archivo-propio{% else %}archivo-compartido{% endif %}"
+              >
+                <td>{{ archivo.id }}</td>
+                <td>{{ archivo.nombre }}</td>
+                <td>{{ archivo.propietario }}</td>
+                <td>
+                  <span
+                    class="tipo-badge {% if archivo.tipo == 'Propio' %}tipo-propio{% else %}tipo-compartido{% endif %}"
+                  >
+                    {{ archivo.tipo }}
+                  </span>
+                </td>
+                <td class="hash-cell">{{ archivo.hash[:20] }}...</td>
+                <td>
+                  {% if archivo.firmas %}
+                  <div class="firma-lista">
+                    {% for firma in archivo.firmas %}
+                    <span
+                      class="firma-item {% if firma.valida %}firma-valida{% else %}firma-invalida{% endif %}"
+                    >
+                      {{ firma.usuario }} {% if firma.valida %}✓{% else %}✗{%
+                      endif %}
+                    </span>
+                    {% endfor %}
+                  </div>
+                  {% else %}
+                  <span style="color: #999; font-size: 12px">Sin firmas</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if archivo.tipo == 'Propio' %}
+                  <button
+                    class="share-btn"
+                    onclick="abrirModalCompartir({{ archivo.id }}, '{{ archivo.nombre }}')"
+                  >
+                    Compartir
+                  </button>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p style="text-align: center; color: #999">
+          No hay archivos disponibles todavía.
+        </p>
+        {% endif %}
+      </div>
+
+      <!-- Sección para firmar archivos -->
+      <div class="section">
+        <h2>✍️ Firmar Archivo</h2>
+        <form id="firmar-form" enctype="multipart/form-data">
+          <label>ID del archivo:</label><br />
+          <input
+            type="number"
+            name="archivo_id"
+            required
+            placeholder="Ingrese el ID del archivo a firmar"
+          /><br />
+
+          <label>Subir llave privada (.pem):</label><br />
+          <input type="file" name="llave" required accept=".pem" /><br />
+
+          <button type="submit">Firmar Archivo</button>
+        </form>
+      </div>
+
+      <!-- Sección para verificar firmas -->
+      <div class="section">
+        <h2>🔍 Verificar Firma</h2>
+        <form id="verificar-form" enctype="multipart/form-data">
+          <label>ID del archivo firmado:</label><br />
+          <input
+            type="number"
+            name="archivo_id"
+            required
+            placeholder="Ingrese el ID del archivo"
+          /><br />
+
+          <label>Subir archivo de firma (.firma):</label><br />
+          <input type="file" name="firma" required accept=".firma" /><br />
+
+          <button type="submit">Verificar Firma</button>
+        </form>
       </div>
     </div>
 
-    <form method="post">
-      <label>Nombre de la clave:</label><br />
-      <input
-        type="text"
-        name="nombre_clave"
-        required
-        placeholder="Ingrese un nombre para su clave"
-      />
-      <br />
-      <button type="submit">Generar Llaves</button>
-    </form>
+    <!-- Modal para compartir archivos -->
+    <div id="compartirModal" class="modal">
+      <div class="modal-content">
+        <span class="close" onclick="cerrarModal()">&times;</span>
+        <h2>🔗 Compartir Archivo</h2>
+        <p
+          id="archivoNombre"
+          style="margin-bottom: 20px; font-weight: bold"
+        ></p>
 
-    <div
-      style="
-        margin-top: 30px;
-        padding: 15px;
-        background: #f8f9fa;
-        border-radius: 5px;
-      "
-    >
-      <h3>Subir archivo para firmar</h3>
-        <form id="upload-form" enctype="multipart/form-data">
-          <input type="file" name="archivo" required>
-          <button type="submit">Subir</button>
-        </form>
+        <label>Seleccionar usuario:</label><br />
+        <select id="usuarioSelect" style="width: 100%; margin-bottom: 10px">
+          <option value="">Cargando usuarios...</option>
+        </select>
 
-        <script>
-        document.getElementById("upload-form").addEventListener("submit", function(event) {
-            event.preventDefault(); // Evita que recargue la página
+        <button onclick="compartirArchivo()">Compartir</button>
+        <button onclick="cerrarModal()" style="background: #6c757d">
+          Cancelar
+        </button>
 
-            const form = event.target;
-            const formData = new FormData(form);
+        <div id="compartidosCon" style="margin-top: 20px">
+          <h3>Compartido con:</h3>
+          <div class="compartidos-lista">
+            <ul id="listaCompartidos"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
 
-            fetch("/upload", {
-                method: "POST",
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                alert(`Archivo subido\n\nHash: ${data.hash}`);
+    <script>
+      let archivoIdActual = null;
+
+      // Subir archivo
+      document
+        .getElementById("upload-form")
+        .addEventListener("submit", function (event) {
+          event.preventDefault();
+          const form = event.target;
+          const formData = new FormData(form);
+
+          fetch("/upload", {
+            method: "POST",
+            body: formData,
+          })
+            .then((response) => response.json())
+            .then((data) => {
+              if (data.error) {
+                alert(`Error: ${data.error}`);
+              } else {
+                alert(`✅ Archivo subido correctamente\n\nHash: ${data.hash}`);
                 location.reload();
+              }
             })
-            .catch(error => {
-                console.error("Error al subir archivo:", error);
-                alert("Ocurrió un error al subir el archivo");
+            .catch((error) => {
+              console.error("Error:", error);
+              alert("❌ Error al subir el archivo");
             });
         });
-        </script>
 
-      <h3>Archivos disponibles para firmar</h3>
-        {% if archivos %}
-          <div style="max-height: 250px; overflow-y: auto; border: 1px solid #ccc;">
-            <table border="1" cellpadding="6" cellspacing="0" style="width: 100%;">
-              <thead style="background-color: #f0f0f0;">
-                <tr>
-                  <th>ID</th>
-                  <th>Nombre</th>
-                  <th>Hash</th>
-                  <th>Fecha</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for archivo in archivos %}
-                <tr>
-                  <td>{{ archivo.id }}</td>
-                  <td>{{ archivo.nombre }}</td>
-                  <td style="font-size: 12px; word-break: break-all;">{{ archivo.hash }}</td>
-                  <td>{{ archivo.fecha_subida }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <p>No hay archivos disponibles todavía.</p>
-        {% endif %}
-
-
-      <h3>Firmar archivo</h3>
-        <form id="firmar-form" enctype="multipart/form-data">
-          <label>ID del archivo:</label><br>
-          <input type="number" name="archivo_id" required><br><br>
-
-          <label>Subir llave privada (.pem):</label><br>
-          <input type="file" name="llave" required><br><br>
-
-          <button type="submit">Firmar archivo</button>
-        </form>
-
-        <script>
-        document.getElementById("firmar-form").addEventListener("submit", function(event) {
+      // Firmar archivo
+      document
+        .getElementById("firmar-form")
+        .addEventListener("submit", function (event) {
           event.preventDefault();
-
           const form = event.target;
           const formData = new FormData(form);
 
           fetch("/firmar", {
             method: "POST",
-            body: formData
+            body: formData,
           })
-          .then(response => response.json())
-          .then(data => {
-            if (data.ruta_firma) {
-              alert(`Archivo firmado correctamente\n\nFirma guardada en:\n${data.ruta_firma}`);
-              window.open("/" + data.ruta_firma, "_blank");
-            } else {
-              alert(`Error al firmar archivo: ${data.message || "Error desconocido"}`);
-            }
-          })
-          .catch(error => {
-            console.error("Error:", error);
-            alert("Error al firmar el archivo.");
-          });
+            .then((response) => response.json())
+            .then((data) => {
+              if (data.error) {
+                alert(`❌ Error: ${data.error}`);
+              } else {
+                alert(
+                  `✅ Archivo firmado correctamente\n\nEstado de la firma: ${
+                    data.valida ? "VÁLIDA ✓" : "INVÁLIDA ✗"
+                  }`
+                );
+                if (data.ruta_firma) {
+                  window.open("/" + data.ruta_firma, "_blank");
+                }
+                location.reload();
+              }
+            })
+            .catch((error) => {
+              console.error("Error:", error);
+              alert("❌ Error al firmar el archivo");
+            });
         });
-        </script>
 
-      <hr>
-      <h3>Verificar firma de archivo</h3>
-        <form id="verificar-form" enctype="multipart/form-data">
-          <label>ID del archivo firmado:</label><br>
-          <input type="number" name="archivo_id" required><br><br>
-
-          <label>Subir archivo de firma (.firma):</label><br>
-          <input type="file" name="firma" required><br><br>
-
-          <button type="submit">Verificar Firma</button>
-        </form>
-
-        <script>
-        document.getElementById("verificar-form").addEventListener("submit", function(event) {
+      // Verificar firma
+      document.getElementById("verificar-form").addEventListener("submit", function(event) {
           event.preventDefault();
-
           const form = event.target;
           const formData = new FormData(form);
 
           fetch("/verificar", {
             method: "POST",
-            body: formData
+            body: formData,
           })
-          .then(response => response.json())
-          .then(data => {
-            if (data.valido) {
-              alert("Firma:\n" + data.mensaje);
+            .then((response) => response.json())
+            .then(data => {
+              if (data.error) {
+                  alert(`❌ Error: ${data.error}`);
+              } else if (data.valido) {
+                  alert(`✅ Firma ${data.mensaje.toUpperCase()}\n\n${data.detalles}`);
+              } else {
+                  alert(`❌ Firma ${data.mensaje.toUpperCase()}\n\n${data.detalles}`);
+              }
+            })
+            .catch((error) => {
+              console.error("Error:", error);
+              alert("❌ Error al verificar la firma");
+            });
+        });
+
+      // Modal para compartir
+      function abrirModalCompartir(archivoId, archivoNombre) {
+        archivoIdActual = archivoId;
+        document.getElementById(
+          "archivoNombre"
+        ).textContent = `Archivo: ${archivoNombre}`;
+        document.getElementById("compartirModal").style.display = "block";
+
+        // Cargar usuarios
+        fetch("/usuarios")
+          .then((response) => response.json())
+          .then((usuarios) => {
+            const select = document.getElementById("usuarioSelect");
+            select.innerHTML =
+              '<option value="">-- Seleccione un usuario --</option>';
+            usuarios.forEach((usuario) => {
+              select.innerHTML += `<option value="${usuario.id}">${usuario.username} (${usuario.email})</option>`;
+            });
+          })
+          .catch((error) => {
+            console.error("Error cargando usuarios:", error);
+            document.getElementById("usuarioSelect").innerHTML =
+              '<option value="">Error al cargar usuarios</option>';
+          });
+
+        // Cargar con quiénes está compartido
+        cargarCompartidos(archivoId);
+      }
+
+      function cerrarModal() {
+        document.getElementById("compartirModal").style.display = "none";
+        archivoIdActual = null;
+      }
+
+      function compartirArchivo() {
+        const usuarioId = document.getElementById("usuarioSelect").value;
+        if (!usuarioId) {
+          alert("⚠️ Por favor seleccione un usuario");
+          return;
+        }
+
+        fetch("/compartir", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            archivo_id: archivoIdActual,
+            compartir_con_id: usuarioId,
+          }),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.error) {
+              alert(`❌ Error: ${data.error}`);
             } else {
-              alert("Firma:\n" + data.mensaje);
+              alert(`✅ ${data.message}`);
+              cargarCompartidos(archivoIdActual);
+              document.getElementById("usuarioSelect").value = "";
             }
           })
-          .catch(error => {
+          .catch((error) => {
             console.error("Error:", error);
-            alert("Error al verificar la firma");
+            alert("❌ Error al compartir el archivo");
           });
-        });
-        </script>
+      }
 
-      <h3>Instrucciones:</h3>
-      <ol>
-        <li>Ingrese un nombre único para identificar su par de llaves</li>
-        <li>Haga clic en "Generar Llaves"</li>
-        <li>La llave pública se guardará en la base de datos</li>
-        <li>La llave privada se descargará automáticamente</li>
-      </ol>
-      <p>
-        <strong>Importante:</strong> Guarde su llave privada en un lugar seguro.
-        No la comparta con nadie.
-      </p>
-    </div>
+      function cargarCompartidos(archivoId) {
+        fetch(`/archivos/${archivoId}/compartidos`)
+          .then((response) => response.json())
+          .then((compartidos) => {
+            const lista = document.getElementById("listaCompartidos");
+            if (compartidos.length === 0) {
+              lista.innerHTML =
+                '<li style="color: #999; text-align: center;">No compartido con nadie aún</li>';
+            } else {
+              lista.innerHTML = compartidos
+                .map(
+                  (c) =>
+                    `<li>👤 <strong>${c.username}</strong> (${
+                      c.email
+                    }) - ${new Date(c.fecha_compartido).toLocaleString()}</li>`
+                )
+                .join("");
+            }
+          })
+          .catch((error) => {
+            console.error("Error cargando compartidos:", error);
+            document.getElementById("listaCompartidos").innerHTML =
+              '<li style="color: red;">Error al cargar lista</li>';
+          });
+      }
+
+      // Cerrar modal al hacer clic fuera
+      window.onclick = function (event) {
+        const modal = document.getElementById("compartirModal");
+        if (event.target == modal) {
+          cerrarModal();
+        }
+      };
+    </script>
   </body>
 </html>
