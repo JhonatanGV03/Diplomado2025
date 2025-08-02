@@ -1,7 +1,10 @@
+import base64
 import datetime  # Manejo de fechas y tiempos
 import hashlib  # Funciones hash, utilizado para calcular el hash de los archivos
 import os  # Funciones del sistema operativo (crear directorios, unir rutas, etc.)
 import secrets  # Para generar tokens y números seguros
+
+from authlib.oauth2.rfc7636 import create_s256_code_challenge
 from flask import send_file, after_this_request
 from functools import wraps  # Para crear decoradores que modifican funciones
 from urllib.parse import urlparse, urljoin
@@ -53,13 +56,14 @@ google = oauth.register(
     access_token_url='https://oauth2.googleapis.com/token',
     access_token_params=None,
     authorize_url='https://accounts.google.com/o/oauth2/auth',
-    authorize_params={'access_type': 'offline',
-                      'code_challenge_method': 'S256'},
+    authorize_params={
+        'access_type': 'offline',
+        'code_challenge_method': 'S256'
+    },
     api_base_url='https://www.googleapis.com/oauth2/v1/',
     userinfo_endpoint='https://openidconnect.googleapis.com/v1/userinfo',
     client_kwargs={'scope': 'openid email profile'},
-    request_token_params={'scope': 'email profile'},
-    request_token_url=None,
+
 )
 
 # Inicialización del Login Manager para el manejo de sesión de usuarios
@@ -148,20 +152,35 @@ def jwt_required(f):
     return decorated
 
 
+def make_pkce_pair():
+    code_verifier = secrets.token_urlsafe(64)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode('ascii')).digest()
+    ).rstrip(b'=').decode('ascii')
+    return code_verifier, code_challenge
+
+
 # ------------------------------------- Autenticación y Registro ---------------------------------------
 # Ruta para iniciar sesión con Google
 @app.route("/login/google")
 def login_google():
     state = secrets.token_urlsafe(16)
     nonce = secrets.token_urlsafe(16)
+    code_verifier = secrets.token_urlsafe(64)
 
-    # Token para evitar ataques de repetición
-    session['nonce'] = nonce
-    # Token para evitar ataques CSRF
+    code_challenge = create_s256_code_challenge(code_verifier)
     session['state'] = state
+    session['nonce'] = nonce
+    session['code_verifier'] = code_verifier
 
     redirect_uri = url_for('authorize_google', _external=True)
-    return oauth.google.authorize_redirect(redirect_uri, nonce=nonce)
+    return oauth.google.authorize_redirect(
+        redirect_uri,
+        nonce=nonce,
+        state=state,
+        code_challenge=code_challenge,
+        code_challenge_method='S256'
+    )
 
 @app.route("/debug-token")
 @jwt_required
@@ -178,8 +197,8 @@ def authorize_google():
     state_expected = session.get("state")
     if not state_received or state_received != state_expected:
         return "Posible ataque CSRF detectado", 403
-
-    token = oauth.google.authorize_access_token()
+    code_verifier = session.pop('code_verifier', None)
+    token = oauth.google.authorize_access_token(code_verifier=code_verifier)
     nonce = session.get('nonce')
     user_info = oauth.google.parse_id_token(token, nonce=nonce)
 
