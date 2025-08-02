@@ -152,8 +152,14 @@ def jwt_required(f):
 # Ruta para iniciar sesión con Google
 @app.route("/login/google")
 def login_google():
-    nonce = secrets.token_urlsafe(16)  # Token para evitar ataques de repetición
+    state = secrets.token_urlsafe(16)
+    nonce = secrets.token_urlsafe(16)
+
+    # Token para evitar ataques de repetición
     session['nonce'] = nonce
+    # Token para evitar ataques CSRF
+    session['state'] = state
+
     redirect_uri = url_for('authorize_google', _external=True)
     return oauth.google.authorize_redirect(redirect_uri, nonce=nonce)
 
@@ -167,6 +173,12 @@ def debug_token():
 # Ruta de autorización para validar la respuesta de Google
 @app.route("/authorize/google")
 def authorize_google():
+    # Verificación del parámetro `state` para prevenir CSRF
+    state_received = request.args.get("state")
+    state_expected = session.get("state")
+    if not state_received or state_received != state_expected:
+        return "Posible ataque CSRF detectado", 403
+
     token = oauth.google.authorize_access_token()
     nonce = session.get('nonce')
     user_info = oauth.google.parse_id_token(token, nonce=nonce)
