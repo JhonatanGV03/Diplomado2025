@@ -44,6 +44,71 @@ os.makedirs(FIRMAS_FOLDER, exist_ok=True)
 JWT_SECRET_KEY = secrets.token_urlsafe(32)  # 256 bits de entropía
 JWT_ALGORITHM = 'HS256'
 
+# =========================
+# Cookies & CSRF
+# =========================
+ACCESS_COOKIE_NAME = os.getenv("ACCESS_COOKIE_NAME", "access_token")
+XSRF_COOKIE_NAME = os.getenv("XSRF_COOKIE_NAME", "XSRF-TOKEN")
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
+COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "Lax")  # Lax | Strict | None
+ACCESS_COOKIE_MAX_AGE = JWT_EXP_MINUTES * 60
+
+def _set_auth_cookies(resp, token: str):
+    """Setea cookie HttpOnly con el access token y cookie XSRF (no HttpOnly) para doble submit."""
+    resp.set_cookie(
+        ACCESS_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        max_age=ACCESS_COOKIE_MAX_AGE,
+        path="/"
+    )
+    xsrf = secrets.token_urlsafe(32)
+    resp.set_cookie(
+        XSRF_COOKIE_NAME,
+        xsrf,
+        httponly=False,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        max_age=ACCESS_COOKIE_MAX_AGE,
+        path="/"
+    )
+    return xsrf
+
+def _clear_auth_cookies(resp):
+    resp.delete_cookie(ACCESS_COOKIE_NAME, path="/")
+    resp.delete_cookie(XSRF_COOKIE_NAME, path="/")
+
+def csrf_protect(fn):
+    """Protección CSRF (doble submit) para POST/PUT/PATCH/DELETE cuando usamos cookies."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            csrf_cookie = request.cookies.get(XSRF_COOKIE_NAME, "")
+            csrf_in = request.headers.get("X-CSRF-Token", "") or request.form.get("csrf_token", "")
+            if not csrf_cookie or not csrf_in or csrf_cookie != csrf_in:
+                return jsonify({"error": "CSRF token inválido"}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+# =========================
+# Seguridad de respuestas (headers)
+# =========================
+@app.after_request
+def set_security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Content-Security-Policy", "default-src 'self'")
+    # HSTS si sirve por HTTPS (recomendado en prod)
+    if COOKIE_SECURE:
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return resp
+
+# =========================
+# DB
+# =========================
 # Conectar a MySQL mediante SQLAlchemy
 engine = create_engine("mysql+pymysql://diplomado:diplomado@persistencia:3306/persistencia")
 
@@ -132,6 +197,9 @@ def jwt_required(f):
         # Si no se encontró, se revisa en la sesión
         if not token and 'jwt_token' in session:
             token = session['jwt_token']
+        # 2) Fallback: cookie HttpOnly
+        if not token:
+            token = request.cookies.get(ACCESS_COOKIE_NAME)
         # En caso de no tener token se retorna error o se redirige al login
         if not token:
             if request.is_json:
@@ -152,6 +220,58 @@ def jwt_required(f):
     return decorated
 
 
+def make_pkce_pair():
+    code_verifier = secrets.token_urlsafe(64)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode('ascii')).digest()
+    ).rstrip(b'=').decode('ascii')
+    return code_verifier, code_challenge
+
+
+# =========================
+# Login manual: límite 3 intentos
+# =========================
+MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "3"))
+LOCKOUT_SECONDS = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "900"))
+_login_attempts = {}  # clave "ip:usuario" -> {"count": int, "lock_until": epoch}
+
+def _attempt_key(username: str) -> str:
+    ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
+    usernorm = (username or "").strip().lower()
+    return f"{ip}:{usernorm}"
+
+def _is_locked(key: str):
+    rec = _login_attempts.get(key)
+    if not rec:
+        return False, 0
+    now = time.time()
+    lock_until = rec.get("lock_until", 0)
+    if lock_until and lock_until > now:
+        return True, int(lock_until - now)
+    return False, 0
+
+def _register_fail(key: str):
+    now = time.time()
+    rec = _login_attempts.get(key, {"count": 0, "lock_until": 0})
+    if rec.get("lock_until", 0) and rec["lock_until"] <= now:
+        rec = {"count": 0, "lock_until": 0}
+    rec["count"] = int(rec.get("count", 0)) + 1
+    if rec["count"] >= MAX_ATTEMPTS:
+        rec["lock_until"] = now + LOCKOUT_SECONDS
+        rec["count"] = 0
+        _login_attempts[key] = rec
+        return True, LOCKOUT_SECONDS, 0
+    else:
+        _login_attempts[key] = rec
+        remaining = MAX_ATTEMPTS - rec["count"]
+        return False, 0, remaining
+
+def _reset_attempts(key: str):
+    _login_attempts.pop(key, None)
+
+# =========================
+# Util PKCE local (para referencia)
+# =========================
 def make_pkce_pair():
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = base64.urlsafe_b64encode(
@@ -282,7 +402,9 @@ def register():
     return render_template('register.html')
 
 
-# Ruta para iniciar sesión con usuario y contraseña
+# =========================
+# Login manual (usuario/contraseña) con cookies + lockout
+# =========================
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -296,34 +418,64 @@ def login():
             else:
                 return render_template('login.html', error='Username y password son requeridos')
 
+        # Anti-fuerza bruta (solo para login manual)
+        key = _attempt_key(username)
+        locked, seconds_left = _is_locked(key)
+        if locked:
+            msg = f"Demasiados intentos fallidos. Intenta de nuevo en {seconds_left} segundos."
+            if request.is_json:
+                return jsonify({'error': msg}), 429
+            else:
+                return render_template('login.html', error=msg), 429
+
         with engine.connect() as conn:
-            # Consultar credenciales del usuario activo
             user = conn.execute(
                 text("SELECT id, username, password_hash FROM usuarios WHERE username = :username AND activo = TRUE"),
                 {"username": username}
             ).fetchone()
 
-            if user and check_password_hash(user[2], password):
-                token = generate_jwt_token(user[0], user[1])
-                if request.is_json:
-                    return jsonify({
-                        'message': 'Login exitoso',
-                        'token': token,
-                        'user_id': user[0],
-                        'username': user[1]
-                    }), 200
-                else:
-                    session['jwt_token'] = token
-                    session['user_id'] = user[0]
-                    session['username'] = user[1]
-                    return redirect(url_for('index'))
+        if user and check_password_hash(user[2], password):
+            _reset_attempts(key)
+            token = generate_jwt_token(user[0], user[1])
+
+            # [CAMBIO] Establecer cookies de autenticación
+            if request.is_json:
+                resp = make_response(jsonify({'message': 'Login exitoso', 'user_id': user[0], 'username': user[1]}))
             else:
+                resp = make_response(redirect(url_for('index')))
+
+            _set_auth_cookies(resp, token)
+            # (opcional) info mínima en sesión
+            session['user_id'] = user[0]
+            session['username'] = user[1]
+            return resp
+        else:
+            just_locked, lock_secs, remaining = _register_fail(key)
+            if just_locked:
+                msg = f"Cuenta bloqueada temporalmente por intentos fallidos. Intenta de nuevo en {lock_secs} segundos."
                 if request.is_json:
-                    return jsonify({'error': 'Credenciales inválidas'}), 401
+                    return jsonify({'error': msg}), 429
                 else:
-                    return render_template('login.html', error='Credenciales inválidas')
+                    return render_template('login.html', error=msg), 429
+            else:
+                msg = f"Credenciales inválidas. Intentos restantes: {remaining}"
+                if request.is_json:
+                    return jsonify({'error': msg}), 401
+                else:
+                    return render_template('login.html', error=msg), 401
 
     return render_template('login.html')
+
+# =========================
+# Logout (limpia cookies) – protegido con CSRF
+# =========================
+@app.route('/logout', methods=["POST"])
+@csrf_protect
+def logout():
+    session.clear()
+    resp = make_response(jsonify({"ok": True, "message": "Logout"}))
+    _clear_auth_cookies(resp)
+    return resp
 
 
 # Ruta principal protegida (requiere JWT)
