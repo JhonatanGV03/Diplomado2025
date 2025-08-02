@@ -2,10 +2,9 @@ import datetime  # Manejo de fechas y tiempos
 import hashlib  # Funciones hash, utilizado para calcular el hash de los archivos
 import os  # Funciones del sistema operativo (crear directorios, unir rutas, etc.)
 import secrets  # Para generar tokens y números seguros
-import tempfile
 from flask import send_file, after_this_request
 from functools import wraps  # Para crear decoradores que modifican funciones
-
+from urllib.parse import urlparse, urljoin
 import jwt  # Manejo de JSON Web Tokens
 from authlib.integrations.flask_client import OAuth  # Soporte para autenticación OAuth
 from cryptography.hazmat.primitives import hashes  # Algoritmos de hash para criptografía
@@ -54,7 +53,8 @@ google = oauth.register(
     access_token_url='https://oauth2.googleapis.com/token',
     access_token_params=None,
     authorize_url='https://accounts.google.com/o/oauth2/auth',
-    authorize_params={'access_type': 'offline'},
+    authorize_params={'access_type': 'offline',
+                      'code_challenge_method': 'S256'},
     api_base_url='https://www.googleapis.com/oauth2/v1/',
     userinfo_endpoint='https://openidconnect.googleapis.com/v1/userinfo',
     client_kwargs={'scope': 'openid email profile'},
@@ -156,6 +156,12 @@ def login_google():
     session['nonce'] = nonce
     redirect_uri = url_for('authorize_google', _external=True)
     return oauth.google.authorize_redirect(redirect_uri, nonce=nonce)
+
+@app.route("/debug-token")
+@jwt_required
+def debug_token():
+    return jsonify({"jwt_token": session.get("jwt_token")})
+
 
 
 # Ruta de autorización para validar la respuesta de Google
@@ -418,6 +424,12 @@ def index():
 
     # Renderizar la página principal con la lista de archivos
     return render_template("index.html", username=username, archivos=archivos_con_firmas)
+
+
+def is_safe_redirect(target):
+    host_url = request.host_url
+    redirect_url = urljoin(host_url, target)
+    return urlparse(redirect_url).scheme in ('http', 'https') and urlparse(host_url).netloc == urlparse(redirect_url).netloc
 
 
 # Ruta para cerrar sesión y limpiar la sesión del usuario
